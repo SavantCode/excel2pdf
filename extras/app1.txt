@@ -1,0 +1,97 @@
+from flask import Flask, request, send_file
+import os
+import traceback
+import pandas as pd
+from werkzeug.utils import secure_filename
+import pdfkit
+from xlsx2html import xlsx2html
+from flask_cors import CORS
+import logging
+import glob
+
+app = Flask(__name__)
+CORS(app)
+
+UPLOAD_FOLDER = 'uploads'
+OUTPUT_FOLDER = 'output'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
+
+# Limit max file size (e.g., 16 MB)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+logging.basicConfig(level=logging.INFO)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def cleanup_files():
+    folders = [UPLOAD_FOLDER, OUTPUT_FOLDER]
+    for folder in folders:
+        files = glob.glob(os.path.join(folder, '*'))
+        for f in files:
+            try:
+                os.remove(f)
+                logging.info(f"Removed file: {f}")
+            except Exception as e:
+                logging.warning(f"Failed to remove file {f}: {e}")
+
+@app.route('/', methods=['GET'])
+def index():
+    return "Excel to PDF Converter API is running."
+
+@app.route('/', methods=['POST'])
+def convert_excel_to_pdf():
+    file = request.files.get('file')
+    if not file:
+        return "No file provided", 400
+
+    filename = secure_filename(file.filename)
+    if not allowed_file(filename):
+        return "Invalid file type. Only .xlsx or .xls allowed.", 400
+
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(filepath)
+    logging.info(f"File saved: {filepath}")
+
+    # If .xls, convert to .xlsx first
+    if filename.lower().endswith('.xls'):
+        xlsx_filepath = filepath.rsplit('.', 1)[0] + '.xlsx'
+        try:
+            df = pd.read_excel(filepath, engine='xlrd')
+            df.to_excel(xlsx_filepath, index=False, engine='openpyxl')
+            filepath = xlsx_filepath
+            logging.info(f"Converted .xls to .xlsx: {xlsx_filepath}")
+        except Exception as e:
+            traceback.print_exc()
+            cleanup_files()
+            return f"Failed to convert .xls to .xlsx: {str(e)}", 500
+
+    html_path = os.path.join(OUTPUT_FOLDER, filename + '.html')
+    pdf_path = os.path.join(OUTPUT_FOLDER, filename + '.pdf')
+
+    try:
+        with open(html_path, 'w', encoding='utf-8') as html_file:
+            xlsx2html(filepath, html_file)
+        logging.info("HTML conversion success")
+
+        pdfkit_config = pdfkit.configuration(wkhtmltopdf='/usr/bin/wkhtmltopdf')
+        pdfkit.from_file(html_path, pdf_path, configuration=pdfkit_config)
+        logging.info("PDF conversion success")
+
+    except Exception as e:
+        traceback.print_exc()
+        cleanup_files()
+        return f"Conversion failed: {str(e)}", 500
+
+    # Send file and cleanup after sending
+    response = send_file(pdf_path, as_attachment=True)
+
+    cleanup_files()
+    return response
+
+if __name__ == '__main__':
+    # Disable debug in production
+    app.run(port=7000, debug=False)

@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: python-pdf-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: WKHTMLTOPDF_PATH
+        value: /usr/bin/wkhtmltopdf
