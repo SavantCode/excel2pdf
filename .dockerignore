@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.git
+*.venv
+venv/
+env/
+*.log
+*.md
+*.csv
+*.xlsx
+*.xls
+node_modules/
+dist/
+build/
+*.sqlite3
